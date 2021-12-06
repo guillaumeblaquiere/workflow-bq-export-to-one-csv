@@ -1,0 +1,130 @@
+main:
+  steps:
+    - assignStep:
+        assign:
+          - bucket: "gib-multiregion-us"
+          - projectid: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          - prefix: "workflow-compose/export"
+          - query: "with tt as ( SELECT random_number FROM `gdglyon-cloudrun.dlp_test.perf_test` limit 1000) SELECT t.random_number FROM `gdglyon-cloudrun.dlp_test.perf_test` t, tt "
+          - finalFileName: "workflow-compose/composed-file.csv"
+          - listResult:
+              nextPageToken: ""
+    - export-query:
+        call: googleapis.bigquery.v2.jobs.query
+        args:
+          projectId: ${projectid}
+          body:
+            query: ${"EXPORT DATA OPTIONS( uri='gs://" + bucket + "/" + prefix + "*.csv', format='CSV', overwrite=true,header=false) AS " + query}
+            useLegacySql: false
+    #init final file
+    #    - create-final-file:
+    #        call: googleapis.storage.v1.objects.insert
+    #        args:
+    #          bucket: ${bucket}
+    #          name: ${finalFileName}
+    #          userProject: ${projectid}
+    #          body:
+    #            name: ${finalFileName}
+    - waitForGCS:
+        call: sys.sleep
+        args:
+          seconds: 5
+    - create-final-file:
+        call: http.post
+        args:
+          url: ${"https://storage.googleapis.com/upload/storage/v1/b/" + bucket + "/o?name=" + finalFileName + "&uploadType=media"}
+          auth:
+            type: OAuth2
+          body:
+    - composefiles:
+        call: list_and_compose_file
+        args:
+          pagetoken: ${listResult.nextPageToken}
+          bucket: ${bucket}
+          prefix: ${prefix}
+          projectid: ${projectid}
+          finalFileName: ${finalFileName}
+        result: listResult
+    - missing-files: # Non recursive loop, to prevent deph errors
+        switch:
+          - condition: ${"nextPageToken" in listResult}
+            next: composefiles
+
+
+list_and_compose_file:
+  params:
+    - pagetoken
+    - bucket
+    - prefix
+    - projectid
+    - finalFileName
+  steps:
+    - list-files:
+        call: googleapis.storage.v1.objects.list
+        args:
+          bucket: ${bucket}
+          pageToken: ${pagetoken}
+          prefix: ${prefix}
+          maxResults: 64
+        result: listResult
+    - init-iter:
+        assign:
+          - iter: 0
+          - finalFileFormatted:
+              name: ${finalFileName}
+          - fileList:
+              - ${finalFileFormatted}
+    - process-files:
+        for:
+          value: file
+          in: ${listResult.items}
+          steps:
+            - concat-file:
+                assign:
+                  - fileFormatted:
+                      name: ${file.name}
+                  - fileList: ${list.concat(fileList, fileFormatted)}
+                  - iter: ${iter +1}
+            - test-concat:
+                switch:
+                  - condition: ${iter >= 31} # max 32 object. The final file + 31 more to compose
+                    steps:
+                      - compose-files:
+                          call: compose_file
+                          args:
+                            fileList: ${fileList}
+                            projectid: ${projectid}
+                            bucket: ${bucket}
+                            finalFileName: ${finalFileName}
+                          next: init-for-iter
+                      - init-for-iter:
+                          assign:
+                            - iter: 0
+                            - fileList:
+                                - ${finalFileFormatted}
+    - finish-compose: # Process the latest files in the fileList buffer
+        call: compose_file
+        args:
+          fileList: ${fileList}
+          projectid: ${projectid}
+          bucket: ${bucket}
+          finalFileName: ${finalFileName}
+    - return-step:
+        return: ${listResult}
+
+
+compose_file:
+  params:
+    - fileList
+    - projectid
+    - bucket
+    - finalFileName
+  steps:
+    - compose:
+        call: googleapis.storage.v1.objects.compose
+        args:
+          destinationBucket: ${bucket}
+          destinationObject: ${text.replace_all(finalFileName,"/","%2F")}
+          userProject: ${projectid}
+          body:
+            sourceObjects: ${fileList}
