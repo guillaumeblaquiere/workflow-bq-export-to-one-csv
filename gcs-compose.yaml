@@ -2,11 +2,11 @@ main:
   steps:
     - assignStep:
         assign:
-          - bucket: "gib-multiregion-us"
-          - projectid: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
-          - prefix: "workflow-compose/export"
-          - query: "with tt as ( SELECT random_number FROM `gdglyon-cloudrun.dlp_test.perf_test` limit 1000) SELECT t.random_number FROM `gdglyon-cloudrun.dlp_test.perf_test` t, tt "
-          - finalFileName: "workflow-compose/composed-file.csv"
+          - bucket: "<YOUR BUCKET>"
+          - projectid: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")} # or "<YOUR PROJECT ID>"
+          - prefix: "<YOUR FILE PREFIX>"
+          - query: "<YOUR BIGQUERY QUERY>"
+          - finalFileName: "<YOUR OUTPUT FILE NAME>"
           - listResult:
               nextPageToken: ""
     - export-query:
@@ -16,19 +16,19 @@ main:
           body:
             query: ${"EXPORT DATA OPTIONS( uri='gs://" + bucket + "/" + prefix + "*.csv', format='CSV', overwrite=true,header=false) AS " + query}
             useLegacySql: false
-    #init final file
-    #    - create-final-file:
-    #        call: googleapis.storage.v1.objects.insert
-    #        args:
-    #          bucket: ${bucket}
-    #          name: ${finalFileName}
-    #          userProject: ${projectid}
-    #          body:
-    #            name: ${finalFileName}
-    - waitForGCS:
+    - waitForGCS: # fix latency issue with Cloud Storage
         call: sys.sleep
         args:
           seconds: 1
+          #init final file # Issue for now. Connector soon usable
+          #    - create-final-file:
+          #        call: googleapis.storage.v1.objects.insert
+          #        args:
+          #          bucket: ${bucket}
+          #          name: ${finalFileName}
+          #          userProject: ${projectid}
+          #          body:
+          #            name: ${finalFileName}
     - create-final-file:
         call: http.post
         args:
@@ -45,7 +45,7 @@ main:
           projectid: ${projectid}
           finalFileName: ${finalFileName}
         result: listResult
-    - missing-files: # Non recursive loop, to prevent deph errors
+    - missing-files: # Non recursive loop, to prevent depth errors
         switch:
           - condition: ${"nextPageToken" in listResult}
             next: composefiles
@@ -125,6 +125,6 @@ compose_file:
         call: googleapis.storage.v1.objects.compose
         args:
           destinationBucket: ${bucket}
-          destinationObject: ${text.replace_all(finalFileName,"/","%2F")}
+          destinationObject: ${text.replace_all(finalFileName,"/","%2F")} # URL encoding function soon available
           body:
             sourceObjects: ${fileList}
