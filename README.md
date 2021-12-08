@@ -4,7 +4,7 @@ This workflow performs an export of data from BigQuery with the
 [export statement](https://cloud.google.com/bigquery/docs/reference/standard-sql/other-statements) and store the result 
 in Cloud Storage. The exported files are appended in a single file thanks to compose feature of Cloud Storage. 
 It's the purpose of this 
-[Medium article](https://medium.com/google-cloud/get-only-one-csv-file-with-bigquery-export-956d2a147886)
+[Medium article](https://medium.com/google-cloud/get-a-single-one-csv-file-with-bigquery-export-956d2a147886)
 
 # Customization
 
