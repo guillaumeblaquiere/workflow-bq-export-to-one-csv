@@ -28,7 +28,7 @@ main:
     - waitForGCS:
         call: sys.sleep
         args:
-          seconds: 5
+          seconds: 1
     - create-final-file:
         call: http.post
         args:
@@ -65,11 +65,10 @@ list_and_compose_file:
           bucket: ${bucket}
           pageToken: ${pagetoken}
           prefix: ${prefix}
-          maxResults: 64
+          maxResults: 62
         result: listResult
     - init-iter:
         assign:
-          - iter: 0
           - finalFileFormatted:
               name: ${finalFileName}
           - fileList:
@@ -84,10 +83,9 @@ list_and_compose_file:
                   - fileFormatted:
                       name: ${file.name}
                   - fileList: ${list.concat(fileList, fileFormatted)}
-                  - iter: ${iter +1}
             - test-concat:
                 switch:
-                  - condition: ${iter >= 31} # max 32 object. The final file + 31 more to compose
+                  - condition: ${len(fileList) == 32}
                     steps:
                       - compose-files:
                           call: compose_file
@@ -99,16 +97,19 @@ list_and_compose_file:
                           next: init-for-iter
                       - init-for-iter:
                           assign:
-                            - iter: 0
                             - fileList:
                                 - ${finalFileFormatted}
     - finish-compose: # Process the latest files in the fileList buffer
-        call: compose_file
-        args:
-          fileList: ${fileList}
-          projectid: ${projectid}
-          bucket: ${bucket}
-          finalFileName: ${finalFileName}
+        switch:
+          - condition: ${len(fileList) > 1} # If there is more than the finalFileName in the list
+            steps:
+              - last-compose-files:
+                  call: compose_file
+                  args:
+                    fileList: ${fileList}
+                    projectid: ${projectid}
+                    bucket: ${bucket}
+                    finalFileName: ${finalFileName}
     - return-step:
         return: ${listResult}
 
@@ -125,6 +126,5 @@ compose_file:
         args:
           destinationBucket: ${bucket}
           destinationObject: ${text.replace_all(finalFileName,"/","%2F")}
-          userProject: ${projectid}
           body:
             sourceObjects: ${fileList}
